@@ -9,7 +9,9 @@ VShield 是一个基于 Nginx njs 的 IP 白名单访问控制脚本，用于在
 - 支持 Stream 鉴权：`stream_verify`
 - 支持自助注册/取消：`register`、`cancel`
 - 支持管理端接口：查询、注册指定 IP、取消指定 IP
+- 支持独立页面（静态资源）：管理员管理页、用户自助注册页、拦截提示页
 - 白名单自动过期，临近过期时自动续期（减少频繁写入）
+- 支持审计日志：记录“哪个用户对哪个 IP 做了什么操作”
 
 ## 环境要求
 
@@ -131,6 +133,70 @@ curl -u admin:password \
 - CLI 场景可优先使用 Basic Auth，避免浏览器跳转流程。
 - 若你希望 CLI 也走 Bearer Token，可在 oauth2-proxy 侧配置对应 token 校验能力，再继续复用 `auth_request`。
 
+## 页面化体验（管理员 + 普通用户）
+
+页面与 API 已分离，`VShield.js` 仅负责鉴权与数据接口，页面由 Nginx 托管静态文件。
+
+仓库内静态页面目录：`ui/`
+
+- `ui/portal.html`：用户自助注册页
+- `ui/admin.html`：管理员控制台
+- `ui/deny.html`：拦截提示页
+
+部署示例（将静态页面复制到 Nginx）：
+
+```bash
+mkdir -p /etc/nginx/vshield-ui
+cp -r ./ui/* /etc/nginx/vshield-ui/
+```
+
+推荐在业务入口使用如下模式，让拦截后用户看到明确提示并可一键前往注册页：
+
+```nginx
+error_page 403 = /ui/deny.html;
+
+location /ui/ {
+    alias /etc/nginx/vshield-ui/;
+    try_files $uri =404;
+}
+
+location = /ui/portal.html {
+    satisfy any;
+    auth_request /oauth2/auth;
+    auth_request_set $vshield_user $upstream_http_x_auth_request_user;
+    auth_basic "VShield Register";
+    auth_basic_user_file /etc/nginx/vshield.htpasswd;
+    alias /etc/nginx/vshield-ui/portal.html;
+}
+
+location = /ui/admin.html {
+    satisfy any;
+    auth_request /oauth2/auth;
+    auth_request_set $vshield_user $upstream_http_x_auth_request_user;
+    auth_basic "VShield Admin";
+    auth_basic_user_file /etc/nginx/vshield.htpasswd;
+    alias /etc/nginx/vshield-ui/admin.html;
+}
+
+location /secure/ {
+    auth_request /validate;
+    proxy_pass http://app_backend;
+}
+```
+
+管理员审计日志（记录到 Nginx 日志）依赖 `auth_request_set` 透传用户：
+
+```nginx
+location = /admin/register {
+    satisfy any;
+    auth_request /oauth2/auth;
+    auth_request_set $vshield_user $upstream_http_x_auth_request_user;
+    auth_basic "VShield Admin";
+    auth_basic_user_file /etc/nginx/vshield.htpasswd;
+    js_content VShield.adminRegister;
+}
+```
+
 ## 接口说明
 
 | 方法 | 入口函数 | 说明 |
@@ -174,6 +240,8 @@ curl -i "http://127.0.0.1/admin/cancel?ip=1.2.3.4"
 - 生产环境请为 `/admin/*`、`/register`、`/cancel` 增加访问控制（内网、Basic Auth、JWT、IP 限制等）。
 - 若部署在反向代理后，请确认 `remoteAddress` 是否为真实客户端 IP（必要时结合 Nginx realip 配置）。
 - 如果同时启用 `auth_request` 与 `auth_basic`，请使用 `satisfy any`，避免把 CLI 场景强制变成浏览器 OAuth 跳转。
+- 审计日志通过 njs `r.log` 输出，关键字段为：`actor`、`source_ip`、`target_ip`、`action`、`status`。
+- OAuth2 场景建议用 `auth_request_set $vshield_user $upstream_http_x_auth_request_user;`，这样日志可以记录真实登录用户。
 
 ## 易用性改进建议
 

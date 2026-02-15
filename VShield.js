@@ -15,7 +15,6 @@ function isPositiveInteger(n) {
  * @returns {number} 正整数毫秒值，非法时回退默认值
  */
 function parseTtlMs(rawTtl) {
-    // njs shared dict 的 ttl 参数单位是毫秒；非法值回退默认值。
     const parsed = Number(rawTtl);
     return isPositiveInteger(parsed) ? parsed : DEFAULT_TTL_MS;
 }
@@ -28,6 +27,33 @@ function ensureStore() {
     return !!whiteList;
 }
 
+function getClientIP(r) {
+    return r.remoteAddress || "";
+}
+
+function getActor(r) {
+    return (
+        r.variables.vshield_user ||
+        r.remoteUser ||
+        r.headersIn["X-Auth-Request-User"] ||
+        r.headersIn["X-Forwarded-User"] ||
+        r.headersIn["X-User"] ||
+        "anonymous"
+    );
+}
+
+function audit(r, action, ip, status, detail) {
+    const actor = getActor(r);
+    const sourceIP = getClientIP(r) || "unknown";
+    const extra = detail ? ` detail=${detail}` : "";
+    r.log(`[vshield_audit] action=${action} status=${status} actor=${actor} source_ip=${sourceIP} target_ip=${ip}${extra}`);
+}
+
+function returnJson(r, status, payload) {
+    r.headersOut["Content-Type"] = "application/json; charset=utf-8";
+    r.return(status, JSON.stringify(payload));
+}
+
 /**
  * 写入或刷新白名单 IP。
  * @param {string} ip 客户端 IP
@@ -36,7 +62,6 @@ function ensureStore() {
 function storeIP(ip, ttlMs) {
     const now = Date.now();
     const safeTtlMs = parseTtlMs(ttlMs);
-    // value 存绝对过期时间戳，ttl 交给 shared dict 做兜底清理。
     whiteList.set(ip, now + safeTtlMs, safeTtlMs);
 }
 
@@ -67,7 +92,6 @@ function isAllowed(ip) {
         return false;
     }
 
-    // 剩余时间过短时续期，减少每次请求都写 shared dict 的开销。
     if ((expireAt - now) <= TTL_REFRESH_THRESHOLD_MS) {
         storeIP(ip, DEFAULT_TTL_MS);
     }
@@ -85,16 +109,16 @@ function http_verify(r) {
         return;
     }
 
-    const clientIP = r.remoteAddress;
+    const clientIP = getClientIP(r);
     if (isAllowed(clientIP)) {
         r.log(`http_verify allowed IP address: ${clientIP}`);
-        // js_content/auth_request 场景需显式返回状态码。
         r.return(200, "OK");
         return;
     }
 
-    r.error(`http_verify denied IP address: ${clientIP}`);
-    r.return(403, "Forbidden");
+    r.headersOut["X-VShield-Reason"] = "IP_NOT_REGISTERED";
+    r.error(`http_verify denied IP address: ${clientIP || "unknown"}`);
+    r.return(403, "VShield: your IP is not registered, please visit /portal/register");
 }
 
 /**
@@ -111,7 +135,6 @@ function stream_verify(s) {
     const clientIP = s.remoteAddress;
     if (isAllowed(clientIP)) {
         s.log(`stream_verify allowed IP address: ${clientIP}`);
-        // stream 子系统通过 allow/deny 决策连接，不使用 HTTP return。
         s.allow();
         return;
     }
@@ -130,13 +153,14 @@ function register(r) {
         return;
     }
 
-    const clientIP = r.remoteAddress;
+    const clientIP = getClientIP(r);
     if (!clientIP) {
         r.return(400, "Missing client IP");
         return;
     }
 
     storeIP(clientIP, DEFAULT_TTL_MS);
+    audit(r, "register_self", clientIP, "ok");
     r.return(200, `${clientIP} is registered`);
 }
 
@@ -150,13 +174,14 @@ function cancel(r) {
         return;
     }
 
-    const clientIP = r.remoteAddress;
+    const clientIP = getClientIP(r);
     if (!clientIP) {
         r.return(400, "Missing client IP");
         return;
     }
 
     whiteList.delete(clientIP);
+    audit(r, "cancel_self", clientIP, "ok");
     r.return(200, `${clientIP} is unregistered`);
 }
 
@@ -178,13 +203,11 @@ function adminWhiteList(r) {
         }
         result.push({
             ip: ip,
-            // 使用 ISO 字符串，避免时区导致的管理端展示歧义。
             expireAt: new Date(expireAt).toISOString()
         });
     }
 
-    r.headersOut["Content-Type"] = "application/json; charset=utf-8";
-    r.return(200, JSON.stringify(result));
+    returnJson(r, 200, result);
 }
 
 /**
@@ -205,6 +228,7 @@ function adminRegister(r) {
 
     const ttlMs = parseTtlMs(r.args.timeout);
     storeIP(clientIP, ttlMs);
+    audit(r, "admin_register", clientIP, "ok", `ttl_ms=${ttlMs}`);
     r.return(200, `${clientIP} is registered`);
 }
 
@@ -225,9 +249,9 @@ function adminCancel(r) {
     }
 
     whiteList.delete(clientIP);
+    audit(r, "admin_cancel", clientIP, "ok");
     r.return(200, `${clientIP} is unregistered`);
 }
-
 
 export default {
     http_verify,
@@ -237,4 +261,4 @@ export default {
     adminWhiteList,
     adminRegister,
     adminCancel
-}
+};

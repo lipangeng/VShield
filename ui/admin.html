@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VShield 管理台</title>
+  <link rel="stylesheet" href="/ui/vshield.css">
+</head>
+<body>
+  <main class="card admin">
+    <h1>VShield IP 管理台</h1>
+    <div class="actions">
+      <input id="ip" placeholder="IP, 例如 1.2.3.4">
+      <input id="ttl" placeholder="TTL(ms), 默认 7200000">
+      <button class="ok" id="addBtn">添加/续期</button>
+      <button id="refreshBtn">刷新</button>
+    </div>
+    <pre id="msg" class="msg">准备就绪</pre>
+    <table>
+      <thead><tr><th>IP</th><th>过期时间(UTC)</th><th>操作</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </main>
+  <script src="/ui/admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VShield 自助注册</title>
+  <link rel="stylesheet" href="/ui/vshield.css">
+</head>
+<body>
+  <main class="card">
+    <h1>VShield 自助注册</h1>
+    <p id="identity" class="meta">正在读取身份信息...</p>
+    <p>点击“注册当前 IP”后，可访问受保护资源。IP 默认有效期为 2 小时。</p>
+    <div class="actions">
+      <button class="ok" id="registerBtn">注册当前 IP</button>
+      <button class="warn" id="cancelBtn">取消当前 IP</button>
+    </div>
+    <pre id="msg" class="msg">等待操作...</pre>
+  </main>
+  <script src="/ui/portal.js"></script>
+</body>
+</html>
