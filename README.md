@@ -234,6 +234,14 @@ curl -i http://127.0.0.1/admin/whitelist
 curl -i "http://127.0.0.1/admin/cancel?ip=1.2.3.4"
 ```
 
+## 测试
+
+项目提供 `node:test` 单元测试，覆盖鉴权、注册/取消、管理接口、TTL 续期与审计日志。
+
+```bash
+node --test test/VShield.test.mjs
+```
+
 ## 注意事项
 
 - `vs_ip` 是脚本中固定共享字典名，Nginx 配置必须一致。
